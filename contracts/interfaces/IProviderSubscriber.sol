@@ -30,7 +30,7 @@ interface IProviderSubscriber {
         uint256 lastChargedBlock; // Last block when this subscription was charged
     }
 
-    function registerProvider(bytes32 providerId, uint256 monthlyFeeInTokens) external;
+    function registerProvider(bytes32 providerId, uint256 monthlyFeeInTokens, uint8 plan) external;
 
     function removeProvider(bytes32 providerId) external;
 
@@ -66,15 +66,7 @@ interface IProviderSubscriber {
 
     function getMinDepositUsd() external view returns (uint256);
 
-    function estimateSubscriptionCost(
-        uint256 monthlyFeeInTokens,
-        uint256 startBlock
-    ) external view returns (uint256 tokensPerBlock, uint256 estimatedCost);
-
-
-    function getSubscriberDebt(bytes32 subscriptionKey) external view returns (uint256);
-
-    function paySubscriptionDebt(bytes32 subscriptionKey, uint256 amount) external;
+    function estimateSubscriptionCost(bytes32 subscriptionId) external view returns (uint256 tokensPerBlock, uint256 estimatedCost);
 
     function getProviderSubscriber(
         bytes32 subscriptionKey
