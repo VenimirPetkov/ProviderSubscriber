@@ -13,6 +13,7 @@ interface IProviderSubscriber {
         uint256 balance;
         bytes32[] activeSubscribers; // Array of active subscription keys (keccak256(subscriberId, providerId))
         uint8 plan;
+        uint256 lastProcessCycle;
     }
 
     struct Subscriber {
@@ -98,4 +99,6 @@ interface IProviderSubscriber {
     function getProviderBalance(bytes32 providerId) external view returns (uint256);
 
     function processBillingCycle(bytes32 providerId) external;
+
+    function canProcessBillingCycle(bytes32 providerId) external view returns (bool canProcess, uint256 blocksRemaining);
 }

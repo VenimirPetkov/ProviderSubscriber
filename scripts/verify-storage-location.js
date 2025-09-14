@@ -10,7 +10,10 @@ function verifyStorageLocation() {
   const subtracted = hash1BigInt - 1n;
   console.log('Step 2 - Subtracted value:', subtracted.toString());
 
-  const encoded = ethers.utils.defaultAbiCoder.encode(['uint256'], [subtracted.toString()]);
+  const encoded = ethers.utils.defaultAbiCoder.encode(
+    ['uint256'],
+    [subtracted.toString()]
+  );
   console.log('Step 3 - Encoded value:', encoded);
 
   const hash2 = ethers.utils.keccak256(encoded);
@@ -21,9 +24,13 @@ function verifyStorageLocation() {
   const finalLocation = '0x' + cleared.toString(16).padStart(64, '0');
   console.log('Step 5 - Final storage location:', finalLocation);
 
-  const providedLocation = '0x6ebb7e5c7906aae7c8d14cd68b97a9303a15fbe348f662c6d553b0e85a973200';
+  const providedLocation =
+    '0x6ebb7e5c7906aae7c8d14cd68b97a9303a15fbe348f662c6d553b0e85a973200';
   console.log('Provided constant:', providedLocation);
-  console.log('Match:', finalLocation.toLowerCase() === providedLocation.toLowerCase());
+  console.log(
+    'Match:',
+    finalLocation.toLowerCase() === providedLocation.toLowerCase()
+  );
 
   return finalLocation;
 }

@@ -149,6 +149,7 @@ abstract contract ProviderSubscriber is
         provider.pausedBlockNumber = 0; // Not paused
         provider.balance = 0;
         provider.plan = plan;
+        provider.lastProcessCycle = block.number;
         $.providers[providerId] = provider;
 
         $.providerCount++;
@@ -446,9 +447,33 @@ abstract contract ProviderSubscriber is
         return $.providers[providerId].balance;
     }
 
+    function canProcessBillingCycle(bytes32 providerId) external view returns (bool canProcess, uint256 blocksRemaining) {
+        ProviderStorage storage $ = _getProviderStorage();
+        Provider memory provider = $.providers[providerId];
+        
+        if (provider.owner == address(0)) {
+            return (false, 0);
+        }
+        
+        uint256 blocksSinceLastCycle = block.number - provider.lastProcessCycle;
+        
+        if (blocksSinceLastCycle >= $.monthDuration) {
+            return (true, 0);
+        } else {
+            blocksRemaining = $.monthDuration - blocksSinceLastCycle;
+            return (false, blocksRemaining);
+        }
+    }
+
     function processBillingCycle(bytes32 providerId) external nonReentrant providerExists(providerId) {
         ProviderStorage storage $ = _getProviderStorage();
         Provider storage provider = $.providers[providerId];
+
+        uint256 blocksSinceLastCycle = block.number - provider.lastProcessCycle;
+        if (provider.lastProcessCycle > 0 && blocksSinceLastCycle < $.monthDuration) {
+            uint256 blocksRemaining = $.monthDuration - blocksSinceLastCycle;
+            revert ProviderErrors.BillingCycleTooEarly(blocksRemaining, $.monthDuration);
+        }
 
         uint256 monthlyEarnings = provider.activeSubscribers.length * provider.monthlyFeeInTokens;
 
@@ -456,6 +481,7 @@ abstract contract ProviderSubscriber is
             provider.balance += monthlyEarnings;
             emit ProviderEvents.ProviderBalanceUpdated(providerId, provider.balance, monthlyEarnings);
         }
+        provider.lastProcessCycle = block.number;
     }
 
     function estimateSubscriptionCost(
@@ -481,12 +507,11 @@ abstract contract ProviderSubscriber is
 
     function getProviderSubscriber(
         bytes32 subscriptionKey
-    ) external view returns (ProviderSubscriber memory) {
+    ) external view returns (ProviderSubscriber memory subscription) {
         ProviderStorage storage $ = _getProviderStorage();
 
-        ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
+        subscription = $.providerActiveSubscribers[subscriptionKey];
 
-        // If not found in active, check paused subscribers
         if (subscription.subscriberId == bytes32(0)) {
             subscription = $.providerPausedSubscribers[subscriptionKey];
         }
@@ -502,7 +527,6 @@ abstract contract ProviderSubscriber is
         ProviderStorage storage $ = _getProviderStorage();
         address caller = _msgSender();
 
-        // Get subscription to extract subscriber ID
         ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
         if (subscription.subscriberId == bytes32(0)) {
             subscription = $.providerPausedSubscribers[subscriptionKey];
@@ -512,7 +536,6 @@ abstract contract ProviderSubscriber is
             revert ProviderErrors.SubscriptionDoesNotExist();
         }
 
-        // Verify the caller owns this subscriber ID
         if ($.subscribers[subscription.subscriberId].owner != caller) {
             revert ProviderErrors.NotSubscriberOwner();
         }
@@ -530,7 +553,6 @@ abstract contract ProviderSubscriber is
 
         ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
 
-        // If not found in active, check paused subscribers
         if (subscription.subscriberId == bytes32(0)) {
             subscription = $.providerPausedSubscribers[subscriptionKey];
         }
