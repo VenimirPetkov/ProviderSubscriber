@@ -22,4 +22,5 @@ library ProviderErrors {
     error SubscriptionAlreadyPaused();
     error SubscriptionNotPaused();
     error SubscriptionNotFound();
+    error BillingCycleTooEarly(uint256 blocksRemaining, uint256 requiredBlocks);
 }
