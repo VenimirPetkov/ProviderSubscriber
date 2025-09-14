@@ -13,6 +13,7 @@ interface IProviderSubscriber {
         uint256 balance;
         bytes32[] activeSubscribers; // Array of active subscription keys (keccak256(subscriberId, providerId))
         uint8 plan;
+        uint256 lastProcessCycle;
     }
 
     struct Subscriber {
@@ -37,7 +38,7 @@ interface IProviderSubscriber {
 
     function subscribeProvider(bytes32 subscriberId, bytes32 providerId) external returns (bytes32 subscriptionKey);
 
-    function pauseSubscription(bytes32 subscriberId, bytes32 providerId) external;
+    function pauseSubscription(bytes32 subscriptionKey) external;
 
     function deposit(bytes32 subscriberId, uint256 amount) external;
 
@@ -70,16 +71,14 @@ interface IProviderSubscriber {
         uint256 startBlock
     ) external view returns (uint256 tokensPerBlock, uint256 estimatedCost);
 
-    function updateSubscriberDebt(bytes32 subscriberId, bytes32 providerId) external;
 
-    function getSubscriberDebt(bytes32 subscriberId, bytes32 providerId) external view returns (uint256);
+    function getSubscriberDebt(bytes32 subscriptionKey) external view returns (uint256);
 
-    function paySubscriptionDebt(bytes32 subscriberId, bytes32 providerId, uint256 amount) external;
+    function paySubscriptionDebt(bytes32 subscriptionKey, uint256 amount) external;
 
     function getProviderSubscriber(
-        bytes32 subscriberId,
-        bytes32 providerId
-    ) external view returns (uint256 subscribedBlockNumber, uint256 pausedBlockNumber, uint8 plan);
+        bytes32 subscriptionKey
+    ) external view returns (ProviderSubscriber memory);
 
     function getProviderDetailedState(
         bytes32 providerId
@@ -100,4 +99,6 @@ interface IProviderSubscriber {
     function getProviderBalance(bytes32 providerId) external view returns (uint256);
 
     function processBillingCycle(bytes32 providerId) external;
+
+    function canProcessBillingCycle(bytes32 providerId) external view returns (bool canProcess, uint256 blocksRemaining);
 }

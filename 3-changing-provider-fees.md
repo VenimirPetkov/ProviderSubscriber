@@ -1,304 +1,437 @@
-# Changing Provider Fees Analysis
+# Dynamic Provider Fee Changes Analysis
 
-## Current System Limitations
+## Current Implementation Analysis
 
-### 1. Static Fee Structure
-The current system has a **major limitation**: provider fees are set once during registration and **cannot be changed**:
-
-```solidity
-// From ProviderSubscriber.sol line 118-157
-function registerProvider(bytes32 providerId, uint256 monthlyFeeInTokens, uint8 plan) external nonReentrant {
-    // ... validation logic ...
-    
-    provider.monthlyFeeInTokens = monthlyFeeInTokens; // Set once, never changed
-    // ... rest of registration ...
-}
-```
-
-**Problems with this approach:**
-- **No Flexibility**: Providers cannot adjust to market conditions
-- **Business Constraints**: Providers may need to change pricing due to cost changes
-- **Competitive Disadvantage**: Cannot respond to competitor pricing
-- **User Experience**: Subscribers may be locked into outdated pricing
-
-### 2. Billing Cycle Complexity
-The current system calculates fees based on block numbers and monthly periods:
+The current Provider-Subscriber system has a **static fee model** where provider fees are set during registration and cannot be changed:
 
 ```solidity
-// From ProviderSubscriber.sol line 577-601
-function _calculateSubscriptionDebt(bytes32 subscriberId, bytes32 providerId) internal view returns (uint256 debt) {
-    // ... existing logic ...
-    
-    uint256 blocksUsed = endBlock - subscribedBlock;
-    return (blocksUsed * provider.monthlyFeeInTokens) / $.monthDuration;
-}
-```
-
-**Issues with fee changes:**
-- **Mid-cycle Changes**: How to handle fee changes during active subscriptions?
-- **Historical Debt**: How to calculate debt for periods with different rates?
-- **Fairness**: Ensuring both providers and subscribers are treated fairly
-
-## Proposed Solutions
-
-### 1. Fee Change Mechanism
-
-#### Basic Fee Update Function
-```solidity
-struct FeeHistory {
-    uint256 feeAmount;
-    uint256 effectiveBlock;
-    uint256 endBlock; // 0 means still active
-}
-
 struct Provider {
-    // ... existing fields ...
-    uint256 currentMonthlyFee;
-    FeeHistory[] feeHistory;
-    uint256 feeChangeNoticePeriod; // Blocks of notice required
+    address owner;
+    uint256 monthlyFeeInTokens;  // Fixed at registration
+    uint256 pausedBlockNumber;
+    uint256 balance;
+    bytes32[] activeSubscribers;
+    uint8 plan;
+    uint256 lastProcessCycle;
 }
 
-function updateProviderFee(
-    bytes32 providerId, 
-    uint256 newMonthlyFee
+function registerProvider(bytes32 providerId, uint256 monthlyFeeInTokens, uint8 plan) external {
+    // Fee is set once and cannot be changed
+    provider.monthlyFeeInTokens = monthlyFeeInTokens;
+    // ...
+}
+```
+
+### Current Limitations
+
+1. **No Fee Flexibility**: Providers cannot adjust pricing based on market conditions
+2. **No Grandfathering**: Existing subscribers pay old rates indefinitely
+3. **No Transition Periods**: No mechanism for gradual fee changes
+4. **No Fee History**: No tracking of fee changes over time
+5. **No Subscriber Protection**: No advance notice for fee increases
+
+## Proposed Dynamic Fee System
+
+### 1. Fee Change Architecture
+
+#### Enhanced Provider Structure
+
+```solidity
+struct FeeSchedule {
+    uint256 currentFee;          // Current active fee
+    uint256 previousFee;         // Previous fee for comparison
+    uint256 effectiveBlock;      // Block when new fee becomes effective
+    uint256 announcementBlock;   // Block when fee change was announced
+    uint256 noticePeriod;        // Blocks of advance notice required
+    bool isPendingChange;        // Whether a fee change is pending
+}
+
+struct EnhancedProvider {
+    address owner;
+    FeeSchedule feeSchedule;
+    uint256 pausedBlockNumber;
+    uint256 balance;
+    bytes32[] activeSubscribers;
+    uint8 plan;
+    uint256 lastProcessCycle;
+    uint256 totalFeeChanges;     // Track number of fee changes
+}
+
+// Track fee change history
+struct FeeChangeRecord {
+    uint256 oldFee;
+    uint256 newFee;
+    uint256 announcementBlock;
+    uint256 effectiveBlock;
+    string reason;
+}
+
+mapping(bytes32 => FeeChangeRecord[]) public providerFeeHistory;
+```
+
+### 2. Fee Change Implementation
+
+#### Announce Fee Change
+
+```solidity
+function announceFeeChange(
+    bytes32 providerId,
+    uint256 newFee,
+    string calldata reason
 ) external onlyProviderOwner(providerId) providerExists(providerId) {
-    Provider storage provider = $.providers[providerId];
+    ProviderStorage storage $ = _getProviderStorage();
+    EnhancedProvider storage provider = $.providers[providerId];
     
     // Validate new fee
-    uint256 newFeeUSD = $.aggregator.getTokenValueInUSD(newMonthlyFee, address($.paymentToken));
-    if (newFeeUSD < $.minFeeUsd) {
-        revert ProviderErrors.MonthlyFeeBelowMinimum(newFeeUSD, $.minFeeUsd);
-    }
+    uint256 newFeeUSD = $.aggregator.getTokenValueInUSD(newFee, address($.paymentToken));
+    require(newFeeUSD >= $.minFeeUsd, "Fee below minimum");
     
-    // Record current fee in history
-    provider.feeHistory.push(FeeHistory({
-        feeAmount: provider.currentMonthlyFee,
-        effectiveBlock: block.number,
-        endBlock: 0 // Will be set when next fee change occurs
+    // Check if there's already a pending change
+    require(!provider.feeSchedule.isPendingChange, "Fee change already pending");
+    
+    // Set notice period (e.g., 1 week = ~50,400 blocks)
+    uint256 noticePeriod = 50400; // 1 week in blocks
+    
+    // Update fee schedule
+    provider.feeSchedule.previousFee = provider.feeSchedule.currentFee;
+    provider.feeSchedule.currentFee = newFee;
+    provider.feeSchedule.effectiveBlock = block.number + noticePeriod;
+    provider.feeSchedule.announcementBlock = block.number;
+    provider.feeSchedule.noticePeriod = noticePeriod;
+    provider.feeSchedule.isPendingChange = true;
+    
+    // Record in history
+    providerFeeHistory[providerId].push(FeeChangeRecord({
+        oldFee: provider.feeSchedule.previousFee,
+        newFee: newFee,
+        announcementBlock: block.number,
+        effectiveBlock: block.number + noticePeriod,
+        reason: reason
     }));
     
-    // Set new fee (effective after notice period)
-    provider.currentMonthlyFee = newMonthlyFee;
-    provider.feeChangeNoticePeriod = 7 * 24 * 60 * 60 / 12; // 7 days in blocks (assuming 12s blocks)
+    provider.totalFeeChanges++;
     
-    emit ProviderEvents.FeeChangeRequested(providerId, newMonthlyFee, block.number + provider.feeChangeNoticePeriod);
+    emit FeeChangeAnnounced(providerId, provider.feeSchedule.previousFee, newFee, block.number + noticePeriod, reason);
 }
 ```
 
-### 2. Mid-Cycle Fee Change Handling
+#### Apply Fee Change
 
-#### Pro-rated Billing Implementation
 ```solidity
-function _calculateSubscriptionDebtWithFeeChanges(
-    bytes32 subscriberId, 
-    bytes32 providerId
-) internal view returns (uint256 totalDebt) {
-    Provider storage provider = $.providers[providerId];
-    ProviderSubscriber memory subscription = _getSubscription(subscriberId, providerId);
+function applyFeeChange(bytes32 providerId) external providerExists(providerId) {
+    ProviderStorage storage $ = _getProviderStorage();
+    EnhancedProvider storage provider = $.providers[providerId];
     
-    uint256 currentBlock = subscription.pausedBlockNumber > 0 ? subscription.pausedBlockNumber : block.number;
-    uint256 startBlock = subscription.subscribedBlockNumber;
+    require(provider.feeSchedule.isPendingChange, "No pending fee change");
+    require(block.number >= provider.feeSchedule.effectiveBlock, "Fee change not yet effective");
     
-    // Calculate debt for each fee period
-    for (uint256 i = 0; i < provider.feeHistory.length; i++) {
-        FeeHistory memory feePeriod = provider.feeHistory[i];
-        
-        uint256 periodStart = i == 0 ? startBlock : feePeriod.effectiveBlock;
-        uint256 periodEnd = feePeriod.endBlock == 0 ? currentBlock : feePeriod.endBlock;
-        
-        if (periodEnd > periodStart) {
-            uint256 blocksInPeriod = periodEnd - periodStart;
-            uint256 periodDebt = (blocksInPeriod * feePeriod.feeAmount) / $.monthDuration;
-            totalDebt += periodDebt;
-        }
-    }
+    // Mark change as applied
+    provider.feeSchedule.isPendingChange = false;
     
-    // Add debt for current fee period
-    if (currentBlock > provider.feeHistory[provider.feeHistory.length - 1].effectiveBlock) {
-        uint256 currentPeriodBlocks = currentBlock - provider.feeHistory[provider.feeHistory.length - 1].effectiveBlock;
-        uint256 currentPeriodDebt = (currentPeriodBlocks * provider.currentMonthlyFee) / $.monthDuration;
-        totalDebt += currentPeriodDebt;
-    }
-    
-    return totalDebt;
+    emit FeeChangeApplied(providerId, provider.feeSchedule.currentFee, block.number);
 }
 ```
 
-### 3. Fairness Mechanisms
+### 3. Billing Cycle Fairness
 
-#### Subscriber Protection
+#### Pro-Rated Billing During Transitions
+
 ```solidity
-struct FeeChangePolicy {
-    uint256 maxIncreasePercent; // Maximum % increase per change
-    uint256 maxIncreasePerYear; // Maximum % increase per year
-    uint256 noticePeriod; // Minimum notice period in blocks
-    bool allowDecreases; // Whether fee decreases are allowed immediately
-}
-
-function updateProviderFeeWithProtection(
-    bytes32 providerId,
-    uint256 newMonthlyFee
-) external onlyProviderOwner(providerId) providerExists(providerId) {
-    Provider storage provider = $.providers[providerId];
-    FeeChangePolicy memory policy = getFeeChangePolicy();
+function calculateSubscriptionCost(
+    bytes32 subscriptionKey,
+    uint256 startBlock,
+    uint256 endBlock
+) public view returns (uint256 totalCost) {
+    ProviderStorage storage $ = _getProviderStorage();
+    ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
+    EnhancedProvider memory provider = $.providers[subscription.providerId];
     
-    // Check increase limits
-    if (newMonthlyFee > provider.currentMonthlyFee) {
-        uint256 increasePercent = ((newMonthlyFee - provider.currentMonthlyFee) * 100) / provider.currentMonthlyFee;
-        
-        if (increasePercent > policy.maxIncreasePercent) {
-            revert ProviderErrors.FeeIncreaseTooLarge(increasePercent, policy.maxIncreasePercent);
-        }
-        
-        // Check yearly increase limit
-        uint256 yearlyIncrease = _calculateYearlyIncrease(providerId, newMonthlyFee);
-        if (yearlyIncrease > policy.maxIncreasePerYear) {
-            revert ProviderErrors.YearlyFeeIncreaseTooLarge(yearlyIncrease, policy.maxIncreasePerYear);
-        }
+    uint256 currentBlock = block.number;
+    uint256 totalCost = 0;
+    
+    // If no fee change during this period
+    if (provider.feeSchedule.effectiveBlock == 0 || provider.feeSchedule.effectiveBlock > endBlock) {
+        uint256 blocksUsed = endBlock - startBlock;
+        return (blocksUsed * provider.feeSchedule.currentFee) / $.monthDuration;
     }
     
-    // Apply notice period for increases
-    if (newMonthlyFee > provider.currentMonthlyFee) {
-        provider.feeChangeNoticePeriod = policy.noticePeriod;
-    } else {
-        provider.feeChangeNoticePeriod = 0; // Immediate for decreases
+    // Calculate cost before fee change
+    if (provider.feeSchedule.effectiveBlock > startBlock) {
+        uint256 blocksBeforeChange = provider.feeSchedule.effectiveBlock - startBlock;
+        uint256 costBeforeChange = (blocksBeforeChange * provider.feeSchedule.previousFee) / $.monthDuration;
+        totalCost += costBeforeChange;
     }
     
-    // Proceed with fee update
-    _updateProviderFee(providerId, newMonthlyFee);
+    // Calculate cost after fee change
+    if (provider.feeSchedule.effectiveBlock < endBlock) {
+        uint256 blocksAfterChange = endBlock - provider.feeSchedule.effectiveBlock;
+        uint256 costAfterChange = (blocksAfterChange * provider.feeSchedule.currentFee) / $.monthDuration;
+        totalCost += costAfterChange;
+    }
+    
+    return totalCost;
 }
 ```
 
-### 4. Subscriber Options
+#### Grandfathering Options
 
-#### Grandfathering and Migration
 ```solidity
-struct SubscriptionTier {
-    uint256 feeAmount;
-    uint256 effectiveBlock;
-    bool isGrandfathered;
-    uint256 migrationDeadline;
+enum GrandfatheringPolicy {
+    NONE,           // All subscribers pay new fee immediately
+    EXISTING_ONLY,  // Existing subscribers keep old fee, new subscribers pay new fee
+    TIME_LIMITED,   // Grandfathering for limited time period
+    TIERED          // Different rates based on subscription duration
 }
 
-function handleFeeChangeForSubscribers(bytes32 providerId, uint256 newFee) internal {
-    Provider storage provider = $.providers[providerId];
+struct GrandfatheringConfig {
+    GrandfatheringPolicy policy;
+    uint256 grandfatheringDuration; // Blocks of grandfathering
+    uint256 grandfatheringFee;      // Fee for grandfathered subscribers
+    mapping(bytes32 => uint256) grandfatheredUntil; // subscriptionKey => block number
+}
+
+mapping(bytes32 => GrandfatheringConfig) public providerGrandfathering;
+```
+
+### 4. Subscriber Protection Mechanisms
+
+#### Fee Change Notifications
+
+```solidity
+event FeeChangeNotification(
+    bytes32 indexed providerId,
+    bytes32 indexed subscriberId,
+    uint256 oldFee,
+    uint256 newFee,
+    uint256 effectiveBlock,
+    string reason
+);
+
+function notifySubscribersOfFeeChange(bytes32 providerId) internal {
+    ProviderStorage storage $ = _getProviderStorage();
+    EnhancedProvider memory provider = $.providers[providerId];
     
-    // Notify all active subscribers
     for (uint256 i = 0; i < provider.activeSubscribers.length; i++) {
         bytes32 subscriptionKey = provider.activeSubscribers[i];
         ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
         
-        // Offer grandfathering option
-        _offerGrandfathering(subscriptionKey, provider.currentMonthlyFee, newFee);
-        
-        emit ProviderEvents.FeeChangeNotification(
-            subscription.subscriberId,
+        emit FeeChangeNotification(
             providerId,
-            provider.currentMonthlyFee,
-            newFee,
-            block.number + provider.feeChangeNoticePeriod
+            subscription.subscriberId,
+            provider.feeSchedule.previousFee,
+            provider.feeSchedule.currentFee,
+            provider.feeSchedule.effectiveBlock,
+            "Fee change announced"
         );
     }
 }
+```
 
-function acceptFeeChange(bytes32 subscriberId, bytes32 providerId, bool acceptNewFee) external {
-    _validateSubscriptionAccess(subscriberId, providerId);
+#### Subscriber Opt-Out Mechanism
+
+```solidity
+function optOutOfFeeChange(bytes32 subscriptionKey) external {
+    ProviderStorage storage $ = _getProviderStorage();
+    _validateSubscriptionAccess(subscriptionKey);
     
-    bytes32 subscriptionKey = _generateSubscriptionKey(subscriberId, providerId);
+    ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
+    EnhancedProvider memory provider = $.providers[subscription.providerId];
     
-    if (acceptNewFee) {
-        // Subscriber accepts new fee
-        $.providerActiveSubscribers[subscriptionKey].feeTier = 1; // New fee tier
-    } else {
-        // Subscriber opts for grandfathering
-        $.providerActiveSubscribers[subscriptionKey].feeTier = 0; // Grandfathered fee
-        $.providerActiveSubscribers[subscriptionKey].grandfatheredUntil = block.number + (30 * 24 * 60 * 60 / 12); // 30 days
-    }
+    require(provider.feeSchedule.isPendingChange, "No pending fee change");
+    require(block.number < provider.feeSchedule.effectiveBlock, "Fee change already effective");
     
-    emit ProviderEvents.FeeChangeResponse(subscriberId, providerId, acceptNewFee);
+    // Mark subscription for cancellation at fee change time
+    $.subscriptionsOptingOut[subscriptionKey] = true;
+    
+    emit SubscriptionOptedOut(subscriptionKey, provider.feeSchedule.effectiveBlock);
 }
 ```
 
 ### 5. Advanced Fee Management
 
-#### Dynamic Pricing
+#### Tiered Pricing System
+
 ```solidity
-struct DynamicPricing {
-    uint256 baseFee;
-    uint256 demandMultiplier; // 1.0 = 100%, 1.5 = 150%
-    uint256 capacityUtilization; // 0-100%
-    uint256 lastUpdate;
+struct PricingTier {
+    uint256 minSubscribers;  // Minimum subscribers for this tier
+    uint256 maxSubscribers;  // Maximum subscribers for this tier
+    uint256 feePerMonth;     // Fee for this tier
+    bool isActive;
 }
 
-function updateDynamicPricing(bytes32 providerId) external onlyProviderOwner(providerId) {
-    Provider storage provider = $.providers[providerId];
-    DynamicPricing storage pricing = provider.dynamicPricing;
+struct TieredProvider {
+    EnhancedProvider provider;
+    PricingTier[] pricingTiers;
+    uint256 currentTier;
+}
+
+function updatePricingTiers(
+    bytes32 providerId,
+    PricingTier[] calldata newTiers
+) external onlyProviderOwner(providerId) {
+    ProviderStorage storage $ = _getProviderStorage();
+    TieredProvider storage tieredProvider = $.tieredProviders[providerId];
     
-    // Calculate capacity utilization
-    uint256 maxCapacity = provider.maxSubscribers;
-    uint256 currentSubscribers = provider.activeSubscribers.length;
-    pricing.capacityUtilization = (currentSubscribers * 100) / maxCapacity;
+    // Clear existing tiers
+    delete tieredProvider.pricingTiers;
     
-    // Adjust demand multiplier based on utilization
-    if (pricing.capacityUtilization > 80) {
-        pricing.demandMultiplier = 120; // 20% increase when >80% full
-    } else if (pricing.capacityUtilization < 50) {
-        pricing.demandMultiplier = 90; // 10% decrease when <50% full
-    } else {
-        pricing.demandMultiplier = 100; // Normal pricing
+    // Add new tiers
+    for (uint256 i = 0; i < newTiers.length; i++) {
+        tieredProvider.pricingTiers.push(newTiers[i]);
     }
     
-    // Update effective fee
-    uint256 newEffectiveFee = (provider.baseMonthlyFee * pricing.demandMultiplier) / 100;
-    provider.currentMonthlyFee = newEffectiveFee;
+    // Update current tier based on subscriber count
+    _updateCurrentTier(providerId);
     
-    pricing.lastUpdate = block.number;
+    emit PricingTiersUpdated(providerId, newTiers.length);
+}
+
+function _updateCurrentTier(bytes32 providerId) internal {
+    ProviderStorage storage $ = _getProviderStorage();
+    TieredProvider storage tieredProvider = $.tieredProviders[providerId];
+    uint256 subscriberCount = tieredProvider.provider.activeSubscribers.length;
     
-    emit ProviderEvents.DynamicPricingUpdated(providerId, newEffectiveFee, pricing.capacityUtilization);
+    for (uint256 i = 0; i < tieredProvider.pricingTiers.length; i++) {
+        PricingTier memory tier = tieredProvider.pricingTiers[i];
+        if (subscriberCount >= tier.minSubscribers && subscriberCount <= tier.maxSubscribers) {
+            tieredProvider.currentTier = i;
+            tieredProvider.provider.feeSchedule.currentFee = tier.feePerMonth;
+            break;
+        }
+    }
 }
 ```
 
-## Implementation Strategy
+#### Dynamic Fee Adjustment
 
-### Phase 1: Basic Fee Changes
-1. Add fee change functionality with notice periods
-2. Implement pro-rated billing for mid-cycle changes
-3. Add basic subscriber notifications
+```solidity
+function adjustFeeBasedOnDemand(bytes32 providerId) external onlyProviderOwner(providerId) {
+    ProviderStorage storage $ = _getProviderStorage();
+    EnhancedProvider storage provider = $.providers[providerId];
+    
+    uint256 subscriberCount = provider.activeSubscribers.length;
+    uint256 currentFee = provider.feeSchedule.currentFee;
+    
+    // Simple demand-based adjustment (can be made more sophisticated)
+    if (subscriberCount > 100) {
+        // High demand - increase fee by 10%
+        uint256 newFee = (currentFee * 110) / 100;
+        _announceFeeChange(providerId, newFee, "Demand-based adjustment");
+    } else if (subscriberCount < 10) {
+        // Low demand - decrease fee by 10%
+        uint256 newFee = (currentFee * 90) / 100;
+        _announceFeeChange(providerId, newFee, "Demand-based adjustment");
+    }
+}
+```
 
-### Phase 2: Fairness Mechanisms
-1. Implement increase limits and protection policies
-2. Add grandfathering options for existing subscribers
-3. Create migration paths for fee changes
+### 6. Fee Change Analytics
 
-### Phase 3: Advanced Features
-1. Implement dynamic pricing based on demand
-2. Add market-based fee adjustments
-3. Create automated fee optimization
+#### Historical Fee Tracking
 
-## Economic Considerations
+```solidity
+struct FeeAnalytics {
+    uint256 totalFeeChanges;
+    uint256 averageFeeChangePercentage;
+    uint256 lastFeeChangeBlock;
+    uint256 totalRevenue;
+    uint256 revenueGrowth;
+}
 
-### Provider Incentives
-- **Market Responsiveness**: Ability to adjust to market conditions
-- **Revenue Optimization**: Dynamic pricing to maximize revenue
-- **Competitive Advantage**: Ability to respond to competitor pricing
+mapping(bytes32 => FeeAnalytics) public providerFeeAnalytics;
 
-### Subscriber Protection
-- **Predictability**: Notice periods for fee increases
-- **Fairness**: Limits on fee increase amounts
-- **Choice**: Options to accept changes or maintain current rates
+function updateFeeAnalytics(bytes32 providerId, uint256 oldFee, uint256 newFee) internal {
+    FeeAnalytics storage analytics = providerFeeAnalytics[providerId];
+    
+    analytics.totalFeeChanges++;
+    analytics.lastFeeChangeBlock = block.number;
+    
+    // Calculate percentage change
+    uint256 changePercentage = ((newFee - oldFee) * 100) / oldFee;
+    analytics.averageFeeChangePercentage = 
+        (analytics.averageFeeChangePercentage + changePercentage) / 2;
+    
+    // Update revenue tracking
+    uint256 monthlyRevenue = newFee * $.providers[providerId].activeSubscribers.length;
+    analytics.revenueGrowth = monthlyRevenue - analytics.totalRevenue;
+    analytics.totalRevenue = monthlyRevenue;
+}
+```
 
-### System Stability
-- **Gradual Changes**: Prevent sudden fee shocks
-- **Transparency**: Clear communication of fee changes
-- **Dispute Resolution**: Mechanisms for handling fee disputes
+### 7. Implementation Strategy
+
+#### Phase 1: Basic Fee Changes
+1. Add fee change announcement system
+2. Implement notice periods
+3. Add pro-rated billing calculations
+4. Create fee change events
+
+#### Phase 2: Subscriber Protection
+1. Implement grandfathering policies
+2. Add opt-out mechanisms
+3. Create notification system
+4. Add fee change analytics
+
+#### Phase 3: Advanced Features
+1. Implement tiered pricing
+2. Add dynamic fee adjustment
+3. Create fee optimization tools
+4. Add comprehensive analytics
+
+### 8. Security Considerations
+
+#### Fee Change Validation
+```solidity
+modifier validateFeeChange(uint256 newFee) {
+    // Prevent excessive fee increases (>50% increase)
+    uint256 currentFee = $.providers[providerId].feeSchedule.currentFee;
+    uint256 maxIncrease = (currentFee * 150) / 100;
+    require(newFee <= maxIncrease, "Fee increase too large");
+    
+    // Prevent rapid fee changes (minimum 1 week between changes)
+    uint256 lastChange = $.providers[providerId].feeSchedule.announcementBlock;
+    require(block.number - lastChange >= 50400, "Too soon for another fee change");
+    _;
+}
+```
+
+#### Anti-Gaming Measures
+- **Rate Limiting**: Limit frequency of fee changes
+- **Maximum Increase**: Cap percentage increases per change
+- **Minimum Notice**: Require advance notice for all changes
+- **Audit Trail**: Complete history of all fee changes
+
+### 9. Gas Optimization
+
+#### Efficient Fee Calculations
+```solidity
+function calculateFeeEfficiently(
+    bytes32 subscriptionKey,
+    uint256 startBlock,
+    uint256 endBlock
+) public view returns (uint256) {
+    // Use assembly for gas-efficient calculations
+    uint256 blocksUsed;
+    assembly {
+        blocksUsed := sub(endBlock, startBlock)
+    }
+    
+    // Cache frequently accessed values
+    uint256 monthlyFee = $.providers[subscription.providerId].feeSchedule.currentFee;
+    uint256 monthDuration = $.monthDuration;
+    
+    return (blocksUsed * monthlyFee) / monthDuration;
+}
+```
 
 ## Conclusion
 
-Implementing fee change functionality requires careful balance between provider flexibility and subscriber protection. The proposed solution provides:
+The proposed dynamic fee change system transforms the Provider-Subscriber system from a static pricing model to a flexible, fair, and transparent pricing platform that supports:
 
-1. **Flexibility**: Providers can adjust fees based on market conditions
-2. **Fairness**: Subscribers are protected from sudden, large fee increases
-3. **Transparency**: Clear communication and notice periods for changes
-4. **Choice**: Subscribers can choose to accept changes or maintain current rates
+1. **Flexible Fee Changes**: Providers can adjust pricing based on market conditions
+2. **Fair Billing**: Pro-rated billing during fee transitions
+3. **Subscriber Protection**: Advance notice, opt-out options, and grandfathering
+4. **Advanced Pricing**: Tiered pricing and demand-based adjustments
+5. **Transparency**: Complete audit trail and analytics
 
-This approach ensures the system remains competitive and responsive while maintaining trust and fairness for all participants.
+This system ensures both providers and subscribers benefit from dynamic pricing while maintaining fairness and transparency throughout the fee change process.
