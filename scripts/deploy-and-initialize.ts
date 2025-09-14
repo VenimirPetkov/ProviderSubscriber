@@ -12,7 +12,7 @@ import { CONTRACT_PARAMS, MOCK_CONTRACTS } from '../deploy-config.js';
 async function deployAndInitialize() {
   const [deployer] = await hre.ethers.getSigners();
 
-  console.log('🚀 Starting Provider-Subscriber System Deployment');
+  console.log('Starting Provider-Subscriber System Deployment');
   console.log('Deployer:', deployer.address);
   console.log('Network:', hre.network.name);
   console.log(
@@ -21,7 +21,7 @@ async function deployAndInitialize() {
   );
 
   // Deploy mock ERC20 token
-  console.log('\n📦 Deploying MockERC20...');
+  console.log('\nDeploying MockERC20...');
   const MockERC20 = await hre.ethers.getContractFactory('MockERC20');
   const mockToken = await MockERC20.deploy(
     MOCK_CONTRACTS.TOKEN.NAME,
@@ -30,10 +30,10 @@ async function deployAndInitialize() {
   );
   await mockToken.waitForDeployment();
   const mockTokenAddress = await mockToken.getAddress();
-  console.log('✅ MockERC20 deployed at:', mockTokenAddress);
+  console.log('MockERC20 deployed at:', mockTokenAddress);
 
   // Deploy mock LINK token
-  console.log('\n📦 Deploying Mock LINK Token...');
+  console.log('\nDeploying Mock LINK Token...');
   const mockLinkToken = await MockERC20.deploy(
     MOCK_CONTRACTS.LINK_TOKEN.NAME,
     MOCK_CONTRACTS.LINK_TOKEN.SYMBOL,
@@ -41,33 +41,30 @@ async function deployAndInitialize() {
   );
   await mockLinkToken.waitForDeployment();
   const mockLinkTokenAddress = await mockLinkToken.getAddress();
-  console.log('✅ Mock LINK Token deployed at:', mockLinkTokenAddress);
+  console.log('Mock LINK Token deployed at:', mockLinkTokenAddress);
 
   // Deploy mock price feed
-  console.log('\n📦 Deploying MockPriceFeed...');
+  console.log('\nDeploying MockPriceFeed...');
   const MockPriceFeed = await hre.ethers.getContractFactory('MockPriceFeed');
   const mockPriceFeed = await MockPriceFeed.deploy(
     MOCK_CONTRACTS.PRICE_FEED.PRICE
   );
   await mockPriceFeed.waitForDeployment();
   const mockPriceFeedAddress = await mockPriceFeed.getAddress();
-  console.log('✅ MockPriceFeed deployed at:', mockPriceFeedAddress);
+  console.log('MockPriceFeed deployed at:', mockPriceFeedAddress);
 
   // Deploy implementation contract
-  console.log('\n📦 Deploying ProviderSubscriberSystem...');
+  console.log('\nDeploying ProviderSubscriberSystem...');
   const ProviderSubscriberSystem = await hre.ethers.getContractFactory(
     'ProviderSubscriberSystem'
   );
   const implementation = await ProviderSubscriberSystem.deploy();
   await implementation.waitForDeployment();
   const implementationAddress = await implementation.getAddress();
-  console.log(
-    '✅ ProviderSubscriberSystem deployed at:',
-    implementationAddress
-  );
+  console.log('ProviderSubscriberSystem deployed at:', implementationAddress);
 
   // Deploy proxy contract
-  console.log('\n📦 Deploying ProviderSubscriberProxy...');
+  console.log('\nDeploying ProviderSubscriberProxy...');
   const ProviderSubscriberProxy = await hre.ethers.getContractFactory(
     'ProviderSubscriberProxy'
   );
@@ -77,10 +74,10 @@ async function deployAndInitialize() {
   );
   await proxy.waitForDeployment();
   const proxyAddress = await proxy.getAddress();
-  console.log('✅ ProviderSubscriberProxy deployed at:', proxyAddress);
+  console.log('ProviderSubscriberProxy deployed at:', proxyAddress);
 
   // Initialize the proxy
-  console.log('\n🔧 Initializing proxy contract...');
+  console.log('\nInitializing proxy contract...');
   const proxyContract = ProviderSubscriberSystem.attach(proxyAddress);
 
   const initTx = await proxyContract.initialize(
@@ -94,32 +91,32 @@ async function deployAndInitialize() {
 
   console.log('Initialization transaction sent:', initTx.hash);
   await initTx.wait();
-  console.log('✅ Proxy initialized successfully!');
+  console.log('Proxy initialized successfully!');
 
   // Verify the deployment
-  console.log('\n🔍 Verifying deployment...');
+  console.log('\nVerifying deployment...');
   const owner = await proxyContract.owner();
   const maxProviders = await proxyContract.getMaxProviders();
   const minFeeUsd = await proxyContract.getMinFeeUsd();
   const minDepositUsd = await proxyContract.getMinDepositUsd();
   const monthDuration = await proxyContract.getMonthDurationInBlocks();
 
-  console.log('\n🎉 Deployment completed successfully!');
-  console.log('\n📋 Contract Addresses:');
+  console.log('\nDeployment completed successfully!');
+  console.log('\nContract Addresses:');
   console.log('- MockERC20:', mockTokenAddress);
   console.log('- Mock LINK Token:', mockLinkTokenAddress);
   console.log('- MockPriceFeed:', mockPriceFeedAddress);
   console.log('- ProviderSubscriberSystem:', implementationAddress);
   console.log('- ProviderSubscriberProxy:', proxyAddress);
 
-  console.log('\n⚙️ Configuration:');
+  console.log('\nConfiguration:');
   console.log('- Owner:', owner);
   console.log('- Max Providers:', maxProviders.toString());
   console.log('- Min Fee USD:', minFeeUsd.toString());
   console.log('- Min Deposit USD:', minDepositUsd.toString());
   console.log('- Month Duration Blocks:', monthDuration.toString());
 
-  console.log('\n💡 Next Steps:');
+  console.log('\nNext Steps:');
   console.log('1. Use the proxy address for all contract interactions');
   console.log('2. Verify contracts on block explorer if needed');
   console.log('3. Test the contract functionality');
@@ -129,6 +126,6 @@ async function deployAndInitialize() {
 deployAndInitialize()
   .then(() => process.exit(0))
   .catch(error => {
-    console.error('❌ Deployment failed:', error);
+    console.error('Deployment failed:', error);
     process.exit(1);
   });

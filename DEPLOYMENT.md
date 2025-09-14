@@ -192,15 +192,15 @@ console.log('Month Duration:', await contract.getMonthDurationInBlocks());
 
 ## Key Features Implemented
 
-✅ **Provider Registration**: Providers can register with minimum $50 fee
-✅ **Subscriber Registration**: Subscribers must deposit minimum $100
-✅ **Upgradeable Contracts**: Uses OpenZeppelin's UUPS proxy pattern
-✅ **Access Control**: Owner-based access control for admin functions
-✅ **Price Integration**: Chainlink price feeds for USD conversion
-✅ **Maximum Providers**: Limited to 200 providers as per assignment
-✅ **Monthly Billing**: Block-based monthly billing cycles
-✅ **Subscription Management**: Pause/resume subscriptions
-✅ **Earnings Withdrawal**: Providers can withdraw accumulated earnings
+**Provider Registration**: Providers can register with minimum $50 fee
+**Subscriber Registration**: Subscribers must deposit minimum $100
+**Upgradeable Contracts**: Uses OpenZeppelin's UUPS proxy pattern
+**Access Control**: Owner-based access control for admin functions
+**Price Integration**: Chainlink price feeds for USD conversion
+**Maximum Providers**: Limited to 200 providers as per assignment
+**Monthly Billing**: Block-based monthly billing cycles
+**Subscription Management**: Pause/resume subscriptions
+**Earnings Withdrawal**: Providers can withdraw accumulated earnings
 
 ## Security Considerations
 
