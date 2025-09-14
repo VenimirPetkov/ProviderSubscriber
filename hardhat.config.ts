@@ -30,11 +30,23 @@ const config: HardhatUserConfig = {
       type: 'edr-simulated',
       chainType: 'op',
     },
-    sepolia: {
+    hoodi: {
       type: 'http',
       chainType: 'l1',
-      url: configVariable('SEPOLIA_RPC_URL'),
-      accounts: [configVariable('SEPOLIA_PRIVATE_KEY')],
+      url: configVariable('HOODI_RPC_URL'),
+      accounts: [configVariable('HOODI_PRIVATE_KEY')],
+    },
+    mainnet: {
+      type: 'http',
+      chainType: 'l1',
+      url: configVariable('MAINNET_RPC_URL'),
+      accounts: [configVariable('MAINNET_PRIVATE_KEY')],
+    },
+    mainnetFork: {
+      type: 'http',
+      chainType: 'l1',
+      url: 'http://127.0.0.1:8545',
+      accounts: [configVariable('MAINNET_FORK_PRIVATE_KEY')],
     },
   },
 };
