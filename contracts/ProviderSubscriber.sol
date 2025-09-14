@@ -548,29 +548,7 @@ abstract contract ProviderSubscriber is
             $.providerPausedSubscribers[subscriptionKey].subscriberId != bytes32(0);
     }
 
-    function _calculateSubscriptionDebt(bytes32 subscriptionKey) internal view returns (uint256 debt) {
-        ProviderStorage storage $ = _getProviderStorage();
 
-        ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
-
-        if (subscription.subscriberId == bytes32(0)) {
-            subscription = $.providerPausedSubscribers[subscriptionKey];
-        }
-
-        if (subscription.subscriberId == bytes32(0)) {
-            return 0;
-        }
-
-        Provider memory provider = $.providers[subscription.providerId];
-        uint256 subscribedBlock = subscription.subscribedBlockNumber;
-        uint256 pausedBlock = subscription.pausedBlockNumber;
-
-        uint256 endBlock = pausedBlock > 0 ? pausedBlock : block.number;
-
-        uint256 blocksUsed = endBlock - subscribedBlock;
-
-        return (blocksUsed * provider.monthlyFeeInTokens) / $.monthDuration;
-    }
     function _generateSubscriptionKey(bytes32 subscriberId, bytes32 providerId) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(subscriberId, providerId));
     }
