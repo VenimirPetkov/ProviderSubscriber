@@ -280,34 +280,33 @@ abstract contract ProviderSubscriber is
     }
 
     function pauseSubscription(
-        bytes32 subscriberId,
-        bytes32 providerId
-    ) external nonReentrant subscriberExists(subscriberId) providerExists(providerId) {
-        _validateSubscriptionAccess(subscriberId, providerId);
+        bytes32 subscriptionKey
+    ) external nonReentrant {
+        _validateSubscriptionAccess(subscriptionKey);
 
         ProviderStorage storage $ = _getProviderStorage();
-        bytes32 subscriptionKey = _generateSubscriptionKey(subscriberId, providerId);
 
         if ($.providerActiveSubscribers[subscriptionKey].subscriberId == bytes32(0)) {
             revert ProviderErrors.SubscriptionNotFound();
         }
 
+        ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
+
         (,uint256 currentDebt) = estimateSubscriptionCost(subscriptionKey);
         if (currentDebt > 0) {
-            if ($.subscribers[subscriberId].balance < currentDebt) {
-                revert ProviderErrors.InsufficientDeposit($.subscribers[subscriberId].balance, currentDebt);
+            if ($.subscribers[subscription.subscriberId].balance < currentDebt) {
+                revert ProviderErrors.InsufficientDeposit($.subscribers[subscription.subscriberId].balance, currentDebt);
             }
-            $.subscribers[subscriberId].balance -= currentDebt;
-            $.providers[providerId].balance += currentDebt;
+            $.subscribers[subscription.subscriberId].balance -= currentDebt;
+            $.providers[subscription.providerId].balance += currentDebt;
             $.providerActiveSubscribers[subscriptionKey].lastChargedBlock = block.number;
         }
         
-        ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
         subscription.pausedBlockNumber = block.number;
         $.providerPausedSubscribers[subscriptionKey] = subscription;
         delete $.providerActiveSubscribers[subscriptionKey];
 
-        emit ProviderEvents.SubscriptionPaused(subscriberId, providerId, block.number);
+        emit ProviderEvents.SubscriptionPaused(subscription.subscriberId, subscription.providerId, block.number);
     }
 
     function withdrawProviderEarnings(
@@ -480,60 +479,10 @@ abstract contract ProviderSubscriber is
         estimatedCost = (blocksSinceSubscription * tokensPerBlock) / precision;
     }
 
-    function updateSubscriberDebt(
-        bytes32 subscriberId,
-        bytes32 providerId
-    ) external nonReentrant subscriberExists(subscriberId) providerExists(providerId) {
-        if (!_subscriptionExists(subscriberId, providerId)) {
-            revert ProviderErrors.SubscriptionDoesNotExist();
-        }
-
-        uint256 totalDebt = _calculateSubscriptionDebt(subscriberId, providerId);
-
-        emit ProviderEvents.SubscriberDebtUpdated(subscriberId, providerId, totalDebt);
-    }
-
-    function getSubscriberDebt(bytes32 subscriberId, bytes32 providerId) external view returns (uint256) {
-        return _calculateSubscriptionDebt(subscriberId, providerId);
-    }
-
-    function paySubscriptionDebt(
-        bytes32 subscriberId,
-        bytes32 providerId,
-        uint256 amount
-    ) external nonReentrant subscriberExists(subscriberId) providerExists(providerId) {
-        _validateSubscriptionAccess(subscriberId, providerId);
-
-        ProviderStorage storage $ = _getProviderStorage();
-        uint256 currentDebt = _calculateSubscriptionDebt(subscriberId, providerId);
-
-        if (amount > currentDebt) {
-            revert("Payment amount exceeds debt");
-        }
-
-        if (amount == 0) {
-            revert ProviderErrors.InvalidAmount();
-        }
-
-        // Transfer tokens from subscriber to contract
-        if (!$.paymentToken.transferFrom(_msgSender(), address(this), amount)) {
-            revert ProviderErrors.TransferFailed();
-        }
-
-        // Increment provider's balance instead of direct transfer
-        $.providers[providerId].balance += amount;
-
-        emit ProviderEvents.SubscriptionDebtPaid(subscriberId, providerId, amount, currentDebt - amount);
-
-        emit ProviderEvents.ProviderBalanceUpdated(providerId, $.providers[providerId].balance, amount);
-    }
-
     function getProviderSubscriber(
-        bytes32 subscriberId,
-        bytes32 providerId
-    ) external view returns (uint256 subscribedBlockNumber, uint256 pausedBlockNumber, uint8 plan) {
+        bytes32 subscriptionKey
+    ) external view returns (ProviderSubscriber memory) {
         ProviderStorage storage $ = _getProviderStorage();
-        bytes32 subscriptionKey = _generateSubscriptionKey(subscriberId, providerId);
 
         ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
 
@@ -546,37 +495,38 @@ abstract contract ProviderSubscriber is
             revert ProviderErrors.SubscriptionDoesNotExist();
         }
 
-        // Get the plan from the provider
-        Provider memory provider = $.providers[subscription.providerId];
-        return (subscription.subscribedBlockNumber, subscription.pausedBlockNumber, provider.plan);
+        return subscription;
     }
 
-    function _validateSubscriptionAccess(bytes32 subscriberId, bytes32 providerId) internal view {
+    function _validateSubscriptionAccess(bytes32 subscriptionKey) internal view {
         ProviderStorage storage $ = _getProviderStorage();
         address caller = _msgSender();
 
-        // Verify the caller owns this subscriber ID
-        if ($.subscribers[subscriberId].owner != caller) {
-            revert ProviderErrors.NotSubscriberOwner();
+        // Get subscription to extract subscriber ID
+        ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
+        if (subscription.subscriberId == bytes32(0)) {
+            subscription = $.providerPausedSubscribers[subscriptionKey];
         }
 
-        // Check if subscription exists
-        if (!_subscriptionExists(subscriberId, providerId)) {
+        if (subscription.subscriberId == bytes32(0)) {
             revert ProviderErrors.SubscriptionDoesNotExist();
+        }
+
+        // Verify the caller owns this subscriber ID
+        if ($.subscribers[subscription.subscriberId].owner != caller) {
+            revert ProviderErrors.NotSubscriberOwner();
         }
     }
 
-    function _subscriptionExists(bytes32 subscriberId, bytes32 providerId) internal view returns (bool) {
+    function _subscriptionExists(bytes32 subscriptionKey) internal view returns (bool) {
         ProviderStorage storage $ = _getProviderStorage();
-        bytes32 subscriptionKey = _generateSubscriptionKey(subscriberId, providerId);
         return
             $.providerActiveSubscribers[subscriptionKey].subscriberId != bytes32(0) ||
             $.providerPausedSubscribers[subscriptionKey].subscriberId != bytes32(0);
     }
 
-    function _calculateSubscriptionDebt(bytes32 subscriberId, bytes32 providerId) internal view returns (uint256 debt) {
+    function _calculateSubscriptionDebt(bytes32 subscriptionKey) internal view returns (uint256 debt) {
         ProviderStorage storage $ = _getProviderStorage();
-        bytes32 subscriptionKey = _generateSubscriptionKey(subscriberId, providerId);
 
         ProviderSubscriber memory subscription = $.providerActiveSubscribers[subscriptionKey];
 
@@ -589,7 +539,7 @@ abstract contract ProviderSubscriber is
             return 0;
         }
 
-        Provider memory provider = $.providers[providerId];
+        Provider memory provider = $.providers[subscription.providerId];
         uint256 subscribedBlock = subscription.subscribedBlockNumber;
         uint256 pausedBlock = subscription.pausedBlockNumber;
 

@@ -21,5 +21,10 @@ export const DEPLOYMENT_CONFIG = {
     },
   },
 
-  DEPLOYMENT_ORDER: ['MockERC20', 'MockPriceFeed', 'ProviderSubscriberSystem', 'ProviderSubscriberProxy'],
+  DEPLOYMENT_ORDER: [
+    'MockERC20',
+    'MockPriceFeed',
+    'ProviderSubscriberSystem',
+    'ProviderSubscriberProxy',
+  ],
 } as const;
