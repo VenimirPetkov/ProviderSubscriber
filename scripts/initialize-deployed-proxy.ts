@@ -42,7 +42,10 @@ async function initializeDeployedProxy() {
   console.log('- Min Fee USD:', CONTRACT_PARAMS.MIN_FEE_USD);
   console.log('- Min Deposit USD:', CONTRACT_PARAMS.MIN_DEPOSIT_USD);
   console.log('- Max Providers:', CONTRACT_PARAMS.MAX_PROVIDERS);
-  console.log('- Month Duration Blocks:', CONTRACT_PARAMS.MONTH_DURATION_BLOCKS);
+  console.log(
+    '- Month Duration Blocks:',
+    CONTRACT_PARAMS.MONTH_DURATION_BLOCKS
+  );
 
   // Get the contract factory and attach to the proxy
   const ProviderSubscriberSystem = await hre.ethers.getContractFactory(
@@ -85,7 +88,7 @@ async function initializeDeployedProxy() {
   const minDepositUsd = await proxy.getMinDepositUsd();
   const monthDuration = await proxy.getMonthDurationInBlocks();
 
-  console.log('\n✅ Proxy initialized successfully!');
+  console.log('\nProxy initialized successfully!');
   console.log('Verification:');
   console.log('- Owner:', owner);
   console.log('- Max Providers:', maxProviders.toString());
@@ -93,7 +96,7 @@ async function initializeDeployedProxy() {
   console.log('- Min Deposit USD:', minDepositUsd.toString());
   console.log('- Month Duration Blocks:', monthDuration.toString());
 
-  console.log('\n📋 Contract addresses:');
+  console.log('\nContract addresses:');
   console.log('- Proxy:', proxyAddress);
   console.log('- Mock Token:', mockTokenAddress);
   console.log('- Mock Price Feed:', mockPriceFeedAddress);
@@ -103,6 +106,6 @@ async function initializeDeployedProxy() {
 initializeDeployedProxy()
   .then(() => process.exit(0))
   .catch(error => {
-    console.error('❌ Initialization failed:', error);
+    console.error('Initialization failed:', error);
     process.exit(1);
   });
